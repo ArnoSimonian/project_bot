@@ -10,9 +10,8 @@ class HTTPException(CheckOutProjectException):
     """Исключение при получении HTTP ответа."""
 
 
-class TelegramMessageError(CheckOutProjectException):
-    """Ошибка неудачной попытки отправить сообщение в Telegram."""
-
+class KeyException(CheckOutProjectException):
+    """Исключение при отсутствии необязательных ключей словаря в ответе API."""
 
 class YandexAPIRequestError(CheckOutProjectException):
     """Ошибка ответа сервера при обработке запроса Yandex API."""

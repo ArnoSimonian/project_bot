@@ -1,17 +1,15 @@
 import logging
 import os
+import requests
 import sys
+import telegram
 import time
 
-from http import HTTPStatus
-from json.decoder import JSONDecodeError
-
-import requests
-import telegram
 from dotenv import load_dotenv
-
-from exceptions import (HTTPException, JsonException, TelegramMessageError,
-                        YandexAPIRequestError)
+from exceptions import (HTTPException, JsonException,
+                        KeyException, YandexAPIRequestError)
+from json.decoder import JSONDecodeError
+from http import HTTPStatus
 
 load_dotenv()
 
@@ -33,28 +31,30 @@ HOMEWORK_VERDICTS = {
 
 logger = logging.getLogger(__name__)
 
-TOKENS_NAMES = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
-
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    for name in TOKENS_NAMES:
-        if not globals().get(name):
-            logger.critical(f'Отсутствует переменная окружения {name}!')
-            raise SystemExit
-        logger.debug("Переменные окружения доступны.")
+    tokens = [
+        ('PRACTICUM_TOKEN', PRACTICUM_TOKEN),
+        ('TELEGRAM_TOKEN', TELEGRAM_TOKEN),
+        ('TELEGRAM_CHAT_ID', TELEGRAM_CHAT_ID),
+    ]
+    missing_tokens = [name for name, value in tokens if not value]
+    if missing_tokens:
+        logger.critical(f'Отсутствуют переменные окружения: '
+                        f'{", ".join(missing_tokens)}!')
+        raise SystemExit
+    logger.debug("Переменные окружения доступны.")
 
 
 def send_message(bot, message):
     """Отправляет сообщение со статусом проверки работы в Telegram чат."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        logger.debug("Сообщение о статусе проверки работы успешно отправено.")
     except telegram.error.TelegramError as error:
         logger.error(f'Не удалось отправить сообщение: {error}')
-        raise TelegramMessageError(
-            f'Не удалось отправить сообщение: {error}'
-        )
+    else:
+        logger.debug("Сообщение о статусе проверки работы успешно отправено.")
 
 
 def get_api_answer(timestamp):
@@ -62,21 +62,21 @@ def get_api_answer(timestamp):
     payload = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
+        if response.status_code != HTTPStatus.OK:
+            code, text = response.status_code, response.text
+            details = f"Код ответа: {code}, сообщение об ошибке: {text}."
+            raise HTTPException(f'{details}')
     except requests.RequestException as error:
         raise YandexAPIRequestError(
             f'Ошибка ответа сервера: {error}'
         )
-    if response.status_code != HTTPStatus.OK:
-        code, text = response.status_code, response.text
-        details = f"Код ответа: {code}, сообщение об ошибке: {text}."
-        raise HTTPException(f'{details}')
-    try:
-        response = response.json()
     except JSONDecodeError:
         raise JsonException(
             "API вернул недопустимый json. "
             f'Ответ: {response.text}.'
         )
+    else:
+        response = response.json()
     return response
 
 
@@ -93,9 +93,14 @@ def check_response(response):
             "Отсутствует необходимый ключ 'homeworks'."
         )
     if 'current_date' not in response:
-        raise KeyError(
-            "Невалидный формат ответа от API: "
-            "Отсутствует необходимый ключ 'current_date'."
+        raise KeyException(
+            "В ответе API нет ключа 'current_date'. "
+            "Работа программы может быть продолжена."
+        )
+    if not isinstance(response['current_date'], int):
+        raise TypeError(
+            "Невалидный тип ответа от API: "
+            "Ключ 'current_date' должен быть целым числом.",
         )
     if not isinstance(response['homeworks'], list):
         raise TypeError(
@@ -149,12 +154,11 @@ def main():
                 message = "Статус не изменился."
                 logger.debug(f'{message} Сообщение не отправлено.')
 
-        except Exception as error:
+        except (Exception, JsonException, HTTPException) as error:
             err_message = f'Сбой в работе программы: {error}'
             if err_message != prev_message:
-                send_message(bot, err_message)
-                logger.error(f'Бот отправил сообщение о сбое в работе '
-                             f'программы {err_message}')
+                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=err_message)
+                logger.error(f'{err_message}')
                 prev_message = err_message
 
         finally:
@@ -173,4 +177,7 @@ if __name__ == '__main__':
             logging.FileHandler('my_logger.log', mode='a', encoding='utf-8')
         ]
     )
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info('Принудительная остановка программы.')
