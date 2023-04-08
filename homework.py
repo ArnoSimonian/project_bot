@@ -1,15 +1,16 @@
 import logging
 import os
-import requests
 import sys
-import telegram
 import time
-
-from dotenv import load_dotenv
-from exceptions import (HTTPException, JsonException,
-                        KeyException, YandexAPIRequestError)
-from json.decoder import JSONDecodeError
 from http import HTTPStatus
+from json.decoder import JSONDecodeError
+
+import requests
+import telegram
+from dotenv import load_dotenv
+
+from exceptions import (ConnectionException, HTTPException, JsonException,
+                        YandexAPIRequestError)
 
 load_dotenv()
 
@@ -31,15 +32,13 @@ HOMEWORK_VERDICTS = {
 
 logger = logging.getLogger(__name__)
 
+TOKENS_NAMES = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
+
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    tokens = [
-        ('PRACTICUM_TOKEN', PRACTICUM_TOKEN),
-        ('TELEGRAM_TOKEN', TELEGRAM_TOKEN),
-        ('TELEGRAM_CHAT_ID', TELEGRAM_CHAT_ID),
-    ]
-    missing_tokens = [name for name, value in tokens if not value]
+    missing_tokens = [token for token in TOKENS_NAMES
+                      if not globals().get(token)]
     if missing_tokens:
         logger.critical(f'Отсутствуют переменные окружения: '
                         f'{", ".join(missing_tokens)}!')
@@ -64,20 +63,21 @@ def get_api_answer(timestamp):
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
         if response.status_code != HTTPStatus.OK:
             code, text = response.status_code, response.text
-            details = f"Код ответа: {code}, сообщение об ошибке: {text}."
-            raise HTTPException(f'{details}')
+            error = f"Код ответа: {code}, сообщение об ошибке: {text}."
+            raise HTTPException(f'{error}')
+        response.json()
+    except requests.exceptions.ConnectionError as error:
+        raise ConnectionException(f'Ошибка подключения: {error}')
     except requests.RequestException as error:
         raise YandexAPIRequestError(
             f'Ошибка ответа сервера: {error}'
         )
     except JSONDecodeError:
         raise JsonException(
-            "API вернул недопустимый json. "
+            f'{error}: API вернул недопустимый json. '
             f'Ответ: {response.text}.'
         )
-    else:
-        response = response.json()
-    return response
+    return response.json()
 
 
 def check_response(response):
@@ -87,27 +87,31 @@ def check_response(response):
             "Невалидный тип ответа от API: "
             "Ответ должен быть словарем."
         )
-    if 'homeworks' not in response:
-        raise KeyError(
-            "Невалидный формат ответа от API: "
-            "Отсутствует необходимый ключ 'homeworks'."
-        )
-    if 'current_date' not in response:
-        raise KeyException(
-            "В ответе API нет ключа 'current_date'. "
-            "Работа программы может быть продолжена."
-        )
-    if not isinstance(response['current_date'], int):
+    try:
+        homeworks = response['homeworks']
+    except KeyError as error:
+        if 'homeworks' not in response:
+            raise KeyError(
+                "Невалидный формат ответа от API: "
+                "Отсутствует необходимый ключ 'homeworks'."
+            )
+        if 'current_date' not in response:
+            print(
+                f'{error}: В ответе API нет ключа current_date. '
+                f'Работа программы может быть продолжена.'
+            )
+    except TypeError as error:
+        if not isinstance(response['current_date'], int):
+            print(
+                f'{error}: Невалидный тип ответа от API: '
+                f'Ключ current_date должен быть целым числом.'
+            )
+    if not isinstance(homeworks, list):
         raise TypeError(
             "Невалидный тип ответа от API: "
-            "Ключ 'current_date' должен быть целым числом.",
+            "Ключ 'homeworks' должен быть списком."
         )
-    if not isinstance(response['homeworks'], list):
-        raise TypeError(
-            "Невалидный тип ответа от API: "
-            "Ключ 'homeworks' должен быть списком.",
-        )
-    return response['homeworks']
+    return homeworks
 
 
 def parse_status(homework):
@@ -154,12 +158,19 @@ def main():
                 message = "Статус не изменился."
                 logger.debug(f'{message} Сообщение не отправлено.')
 
-        except (Exception, JsonException, HTTPException) as error:
+        except (JSONDecodeError, HTTPException, KeyError, TypeError,
+                requests.exceptions.ConnectionError, requests.RequestException,
+                ValueError, YandexAPIRequestError) as error:
             err_message = f'Сбой в работе программы: {error}'
             if err_message != prev_message:
                 bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=err_message)
                 logger.error(f'{err_message}')
                 prev_message = err_message
+
+        except Exception as error:
+            err_message = f'Сбой в работе программы: {error}'
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=err_message)
+            logger.error(f'{err_message}')
 
         finally:
             time.sleep(RETRY_PERIOD)
