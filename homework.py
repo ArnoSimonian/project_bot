@@ -65,19 +65,18 @@ def get_api_answer(timestamp):
             code, text = response.status_code, response.text
             error = f"Код ответа: {code}, сообщение об ошибке: {text}."
             raise HTTPException(f'{error}')
-        response.json()
-    except requests.exceptions.ConnectionError as error:
-        raise ConnectionException(f'Ошибка подключения: {error}')
+        return response.json()
     except requests.RequestException as error:
-        raise YandexAPIRequestError(
+        raise ConnectionException(
+            f'Ошибка подключения: {error}'
+        ) or YandexAPIRequestError(
             f'Ошибка ответа сервера: {error}'
         )
-    except JSONDecodeError:
+    except JSONDecodeError as error:
         raise JsonException(
             f'{error}: API вернул недопустимый json. '
             f'Ответ: {response.text}.'
         )
-    return response.json()
 
 
 def check_response(response):
@@ -87,31 +86,27 @@ def check_response(response):
             "Невалидный тип ответа от API: "
             "Ответ должен быть словарем."
         )
-    try:
-        homeworks = response['homeworks']
-    except KeyError as error:
-        if 'homeworks' not in response:
-            raise KeyError(
-                "Невалидный формат ответа от API: "
-                "Отсутствует необходимый ключ 'homeworks'."
-            )
-        if 'current_date' not in response:
-            print(
-                f'{error}: В ответе API нет ключа current_date. '
-                f'Работа программы может быть продолжена.'
-            )
-    except TypeError as error:
-        if not isinstance(response['current_date'], int):
-            print(
-                f'{error}: Невалидный тип ответа от API: '
-                f'Ключ current_date должен быть целым числом.'
-            )
-    if not isinstance(homeworks, list):
+    if 'homeworks' not in response:
+        raise KeyError(
+            "Невалидный формат ответа от API: "
+            "Отсутствует необходимый ключ 'homeworks'."
+        )
+    if 'current_date' not in response:
+        logger.warning(
+            "В ответе API нет ключа current_date. "
+            "Работа программы может быть продолжена."
+        )
+    if not isinstance(response['current_date'], int):
+        logger.warning(
+            "Неожиданный тип ответа от API: "
+            "Ключ current_date должен быть целым числом."
+        )
+    if not isinstance(response['homeworks'], list):
         raise TypeError(
             "Невалидный тип ответа от API: "
             "Ключ 'homeworks' должен быть списком."
         )
-    return homeworks
+    return response['homeworks']
 
 
 def parse_status(homework):
@@ -158,19 +153,12 @@ def main():
                 message = "Статус не изменился."
                 logger.debug(f'{message} Сообщение не отправлено.')
 
-        except (JSONDecodeError, HTTPException, KeyError, TypeError,
-                requests.exceptions.ConnectionError, requests.RequestException,
-                ValueError, YandexAPIRequestError) as error:
-            err_message = f'Сбой в работе программы: {error}'
+        except Exception as error:
+            err_message = f'Сбой в работе программы. {error}'
+            logger.error(f'{err_message}')
             if err_message != prev_message:
                 bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=err_message)
-                logger.error(f'{err_message}')
                 prev_message = err_message
-
-        except Exception as error:
-            err_message = f'Сбой в работе программы: {error}'
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=err_message)
-            logger.error(f'{err_message}')
 
         finally:
             time.sleep(RETRY_PERIOD)
