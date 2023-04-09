@@ -10,7 +10,7 @@ import telegram
 from dotenv import load_dotenv
 
 from exceptions import (ConnectionException, HTTPException, JsonException,
-                        YandexAPIRequestError)
+                        SomeDateError, YandexAPIRequestError)
 
 load_dotenv()
 
@@ -92,12 +92,12 @@ def check_response(response):
             "Отсутствует необходимый ключ 'homeworks'."
         )
     if 'current_date' not in response:
-        logger.warning(
+        raise SomeDateError(
             "В ответе API нет ключа current_date. "
             "Работа программы может быть продолжена."
         )
     if not isinstance(response['current_date'], int):
-        logger.warning(
+        raise SomeDateError(
             "Неожиданный тип ответа от API: "
             "Ключ current_date должен быть целым числом."
         )
@@ -152,6 +152,10 @@ def main():
             else:
                 message = "Статус не изменился."
                 logger.debug(f'{message} Сообщение не отправлено.')
+
+        except SomeDateError as error:
+            err_message = f'{error}'
+            logger.error(f'{err_message}')
 
         except Exception as error:
             err_message = f'Сбой в работе программы. {error}'

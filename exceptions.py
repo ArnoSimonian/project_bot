@@ -13,5 +13,9 @@ class HTTPException(CheckOutProjectException):
     """Исключение при получении HTTP ответа."""
 
 
+class SomeDateError(CheckOutProjectException):
+    """Ошибка отсутствия в ответе API 'current_date' или его некорректное значение."""
+
+
 class YandexAPIRequestError(CheckOutProjectException):
     """Ошибка ответа сервера при обработке запроса Yandex API."""
