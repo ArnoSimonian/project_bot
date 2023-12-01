@@ -25,7 +25,7 @@
 
 2. Создайте файл ```.env``` с переменными окружения:
 
-- ```PRACTICUM_TOKEN``` - токен API сервиса Практикум.Домашка
+- ```PRACTICUM_TOKEN``` - токен API сервиса
 - ```TELEGRAM_TOKEN``` - токен Telegram-бота
 - ```TELEGRAM_CHAT_ID``` - ID чата адресата оповещения
 
